@@ -1,4 +1,4 @@
-const API_URL = "http://localhost:8000";
+const API_URL = "https://ai-learning-agent-lk0m.onrender.com/";
 
 export const apiRequest = async (
   endpoint,
