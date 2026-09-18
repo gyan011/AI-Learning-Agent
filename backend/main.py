@@ -84,7 +84,6 @@ async def log_requests(request: Request, call_next):
 # CORS
 FRONTEND_URL = os.getenv(
     "FRONTEND_URL",
-    "http://localhost:5173",
     "https://ai-learning-agent-eight.vercel.app"
 )
 
