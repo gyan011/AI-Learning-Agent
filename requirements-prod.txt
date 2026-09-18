@@ -1,0 +1,14 @@
+python-dotenv
+langchain-community
+pypdf
+python-docx
+langchain-huggingface
+sentence-transformers
+langchain-chroma
+langchain-groq
+fastapi
+uvicorn
+python-jose[cryptography]
+pydantic[email]
+slowapi
+python-multipart

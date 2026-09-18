@@ -1,0 +1,17 @@
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+.git/
+.gitignore
+
+.env
+.vscode/
+
+frontend/node_modules/
+frontend/dist/
+
+data/chroma_db/
+data/progress.db
+data/uploads/
