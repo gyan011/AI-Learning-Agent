@@ -3,7 +3,6 @@ langchain-community
 pypdf
 python-docx
 langchain-huggingface
-sentence-transformers
 langchain-chroma
 langchain-groq
 fastapi

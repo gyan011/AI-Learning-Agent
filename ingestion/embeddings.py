@@ -1,18 +1,18 @@
 from functools import lru_cache
 
-from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_huggingface import HuggingFaceEndpointEmbeddings
 
-from config.settings import EMBEDDING_MODEL
+from config.settings import EMBEDDING_MODEL, HF_TOKEN
 
 
 @lru_cache(maxsize=1)
 def get_embeddings():
-    return HuggingFaceEmbeddings(
-        model_name=EMBEDDING_MODEL,
-        model_kwargs={
-            "device": "cpu",
-        },
-        encode_kwargs={
-            "normalize_embeddings": True,
-        },
+
+    if not HF_TOKEN:
+        raise RuntimeError("HF_TOKEN is not configured.")
+
+    return HuggingFaceEndpointEmbeddings(
+        model=EMBEDDING_MODEL,
+        task="feature-extraction",
+        huggingfacehub_api_token=HF_TOKEN,
     )

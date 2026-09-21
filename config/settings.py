@@ -1,10 +1,14 @@
 import os
+
 from dotenv import load_dotenv
 
 load_dotenv()
 
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+HF_TOKEN = os.getenv("HF_TOKEN")
+
 
 LLM_MODEL = os.getenv(
     "LLM_MODEL",
@@ -14,6 +18,7 @@ LLM_MODEL = os.getenv(
 TEMPERATURE = float(
     os.getenv("TEMPERATURE", "0.2")
 )
+
 
 EMBEDDING_MODEL = os.getenv(
     "EMBEDDING_MODEL",
@@ -43,7 +48,6 @@ RETRIEVAL_K = int(
 MAX_FILE_SIZE_MB = int(
     os.getenv("MAX_FILE_SIZE_MB", "10")
 )
-
 
 
 MAX_QUESTIONS_PER_MINUTE = int(
