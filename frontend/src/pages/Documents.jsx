@@ -288,7 +288,7 @@ const Documents = () => {
               <div className="space-y-3">
                 {documents.map((document) => (
                   <div
-                    key={ddocument.id}
+                    key={document.id}
                     className="flex flex-col gap-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 transition hover:bg-white/[0.05] sm:flex-row sm:items-center sm:justify-between"
                   >
                     <div className="flex min-w-0 items-center gap-3">
