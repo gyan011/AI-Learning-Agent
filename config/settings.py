@@ -9,6 +9,28 @@ GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 HF_TOKEN = os.getenv("HF_TOKEN")
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+QDRANT_URL = os.getenv("QDRANT_URL")
+
+QDRANT_API_KEY = os.getenv("QDRANT_API_KEY")
+
+QDRANT_COLLECTION_NAME = os.getenv(
+    "QDRANT_COLLECTION_NAME",
+    "ai_learning_documents",
+)
+
+SUPABASE_URL = os.getenv("SUPABASE_URL")
+
+SUPABASE_SECRET_KEY = os.getenv(
+    "SUPABASE_SECRET_KEY"
+)
+
+SUPABASE_STORAGE_BUCKET = os.getenv(
+    "SUPABASE_STORAGE_BUCKET",
+    "documents",
+)
+
 
 LLM_MODEL = os.getenv(
     "LLM_MODEL",

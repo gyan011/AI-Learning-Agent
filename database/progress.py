@@ -1,23 +1,20 @@
-import sqlite3
-from pathlib import Path
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+import psycopg
 
-DATABASE_PATH = Path("data/progress.db")
+from config.settings import DATABASE_URL
 
 
 def get_connection():
     """
-    Create and return a SQLite database connection.
+    Create and return a PostgreSQL database connection.
     """
 
-    DATABASE_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured.")
 
-    return sqlite3.connect(DATABASE_PATH)
+    return psycopg.connect(DATABASE_URL)
 
 
 def initialize_database():
@@ -26,25 +23,28 @@ def initialize_database():
     """
 
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS progress (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            activity_type TEXT NOT NULL,
-            topic TEXT NOT NULL,
-            score REAL NOT NULL,
-            total REAL NOT NULL,
-            percentage REAL NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS progress (
+                    id SERIAL PRIMARY KEY,
+                    user_id INTEGER NOT NULL,
+                    activity_type TEXT NOT NULL,
+                    topic TEXT NOT NULL,
+                    score DOUBLE PRECISION NOT NULL,
+                    total DOUBLE PRECISION NOT NULL,
+                    percentage DOUBLE PRECISION NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
 
-    connection.commit()
-    connection.close()
+        connection.commit()
+
+    finally:
+        connection.close()
 
 
 def get_current_time():
@@ -87,34 +87,37 @@ def save_progress(
     created_at = get_current_time()
 
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        INSERT INTO progress (
-            user_id,
-            activity_type,
-            topic,
-            score,
-            total,
-            percentage,
-            created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            user_id,
-            activity_type,
-            topic,
-            score,
-            total,
-            percentage,
-            created_at,
-        ),
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO progress (
+                    user_id,
+                    activity_type,
+                    topic,
+                    score,
+                    total,
+                    percentage,
+                    created_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    user_id,
+                    activity_type,
+                    topic,
+                    score,
+                    total,
+                    percentage,
+                    created_at,
+                ),
+            )
 
-    connection.commit()
-    connection.close()
+        connection.commit()
+
+    finally:
+        connection.close()
 
 
 def get_progress(user_id: int):
@@ -126,29 +129,31 @@ def get_progress(user_id: int):
         raise ValueError("Invalid user ID.")
 
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT
-            activity_type,
-            topic,
-            score,
-            total,
-            percentage,
-            created_at
-        FROM progress
-        WHERE user_id = ?
-        ORDER BY id DESC
-        """,
-        (user_id,),
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    activity_type,
+                    topic,
+                    score,
+                    total,
+                    percentage,
+                    created_at
+                FROM progress
+                WHERE user_id = %s
+                ORDER BY id DESC
+                """,
+                (user_id,),
+            )
 
-    records = cursor.fetchall()
+            records = cursor.fetchall()
 
-    connection.close()
+        return records
 
-    return records
+    finally:
+        connection.close()
 
 
 def get_topic_progress(
@@ -166,27 +171,29 @@ def get_topic_progress(
         raise ValueError("Topic cannot be empty.")
 
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT
-            activity_type,
-            topic,
-            score,
-            total,
-            percentage,
-            created_at
-        FROM progress
-        WHERE user_id = ?
-        AND topic = ?
-        ORDER BY id DESC
-        """,
-        (user_id, topic),
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    activity_type,
+                    topic,
+                    score,
+                    total,
+                    percentage,
+                    created_at
+                FROM progress
+                WHERE user_id = %s
+                AND topic = %s
+                ORDER BY id DESC
+                """,
+                (user_id, topic),
+            )
 
-    records = cursor.fetchall()
+            records = cursor.fetchall()
 
-    connection.close()
+        return records
 
-    return records
+    finally:
+        connection.close()

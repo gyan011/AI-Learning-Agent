@@ -1,31 +1,33 @@
-from retrieval.vector_store import get_vector_store
-from config.settings import RETRIEVAL_K
+from functools import lru_cache
+
+from langchain_qdrant import QdrantVectorStore
+
+from ingestion.embeddings import get_embeddings
+from config.settings import (
+    QDRANT_URL,
+    QDRANT_API_KEY,
+    QDRANT_COLLECTION_NAME,
+    RETRIEVAL_K,
+)
 
 
-def get_retriever(user_id: int):
-    """
-    Create a retriever that only searches
-    documents belonging to the specified user.
-    """
+@lru_cache(maxsize=1)
+def get_vector_store():
 
-    if user_id <= 0:
-        raise ValueError(
-            "Invalid user ID."
-        )
+    if not QDRANT_URL:
+        raise RuntimeError("QDRANT_URL is not configured.")
 
-    vector_store = get_vector_store()
+    if not QDRANT_API_KEY:
+        raise RuntimeError("QDRANT_API_KEY is not configured.")
 
-    retriever = vector_store.as_retriever(
-        search_type="similarity",
-        search_kwargs={
-            "k": RETRIEVAL_K,
-            "filter": {
-                "user_id": str(user_id)
-            },
-        },
+    embeddings = get_embeddings()
+
+    return QdrantVectorStore.from_existing_collection(
+        embedding=embeddings,
+        collection_name=QDRANT_COLLECTION_NAME,
+        url=QDRANT_URL,
+        api_key=QDRANT_API_KEY,
     )
-
-    return retriever
 
 
 def retrieve_documents(
@@ -33,24 +35,30 @@ def retrieve_documents(
     user_id: int,
 ):
     """
-    Retrieve documents belonging only to
-    the authenticated user.
+    Retrieve relevant documents for a specific user.
     """
 
     if not query or not query.strip():
-        raise ValueError(
-            "Query cannot be empty."
-        )
+        raise ValueError("Query cannot be empty.")
 
     if user_id <= 0:
-        raise ValueError(
-            "Invalid user ID."
-        )
+        raise ValueError("Invalid user ID.")
 
-    retriever = get_retriever(user_id)
+    vector_store = get_vector_store()
 
-    documents = retriever.invoke(
-        query
+    results = vector_store.similarity_search(
+        query,
+        k=RETRIEVAL_K,
+        filter={
+            "must": [
+                {
+                    "key": "metadata.user_id",
+                    "match": {
+                        "value": str(user_id),
+                    },
+                }
+            ]
+        },
     )
 
-    return documents
+    return results

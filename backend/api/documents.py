@@ -1,17 +1,36 @@
 from pathlib import Path
-import shutil
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    UploadFile,
+    File,
+    Request,
+)
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from jose import jwt, JWTError
 
 from backend.api.auth import SECRET_KEY, ALGORITHM
+from backend.core.rate_limit import limiter
+
 from ingestion.loader import load_document
 from ingestion.splitter import split_documents
-from retrieval.vector_store import create_vector_store, get_vector_store
-from fastapi import Request
-from backend.core.rate_limit import limiter
+
+from retrieval.vector_store import create_vector_store
+
+from database.documents import (
+    save_document,
+    get_user_documents,
+    get_document,
+    delete_document_record,
+)
+
+from utils.storage import (
+    upload_file,
+    delete_file,
+)
 
 
 router = APIRouter(
@@ -21,7 +40,7 @@ router = APIRouter(
 
 security = HTTPBearer()
 
-UPLOAD_DIR = Path("data/uploads")
+TEMP_UPLOAD_DIR = Path("data/uploads")
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 ALLOWED_EXTENSIONS = {
@@ -67,15 +86,22 @@ async def upload_document(
     file: UploadFile = File(...),
     user_id: int = Depends(get_current_user),
 ):
+    temporary_file_path = None
+
     try:
+
+        # -----------------------------
+        # Validate file
+        # -----------------------------
+
         if not file.filename:
             raise HTTPException(
                 status_code=400,
                 detail="No file selected.",
             )
 
-        filename = Path(file.filename).name
-        extension = Path(filename).suffix.lower()
+        original_filename = Path(file.filename).name
+        extension = Path(original_filename).suffix.lower()
 
         if extension not in ALLOWED_EXTENSIONS:
             raise HTTPException(
@@ -83,25 +109,51 @@ async def upload_document(
                 detail="Unsupported file type. Use PDF, TXT, or DOCX.",
             )
 
-        user_upload_dir = UPLOAD_DIR / str(user_id)
-        user_upload_dir.mkdir(
+        # -----------------------------
+        # Generate unique filenames
+        # -----------------------------
+
+        safe_filename = f"{uuid.uuid4().hex}{extension}"
+
+        document_uuid = uuid.uuid4().hex
+
+        # -----------------------------
+        # Temporary local storage
+        # -----------------------------
+
+        user_temp_dir = TEMP_UPLOAD_DIR / str(user_id)
+
+        user_temp_dir.mkdir(
             parents=True,
             exist_ok=True,
         )
 
-        foriginal_filename = Path(file.filename).name
-        safe_filename = f"{uuid.uuid4().hex}{extension}"
-        file_path = user_upload_dir / safe_filename
+        temporary_file_path = (
+            user_temp_dir / safe_filename
+        )
+
+        # -----------------------------
+        # Save uploaded file temporarily
+        # -----------------------------
 
         file_size = 0
 
-        with open(file_path, "wb") as buffer:
-            while chunk := await file.read(1024 * 1024):
+        with open(
+            temporary_file_path,
+            "wb",
+        ) as buffer:
+
+            while chunk := await file.read(
+                1024 * 1024
+            ):
+
                 file_size += len(chunk)
 
                 if file_size > MAX_FILE_SIZE:
-                    buffer.close()
-                    file_path.unlink(missing_ok=True)
+
+                    temporary_file_path.unlink(
+                        missing_ok=True
+                    )
 
                     raise HTTPException(
                         status_code=400,
@@ -110,7 +162,13 @@ async def upload_document(
 
                 buffer.write(chunk)
 
-        documents = load_document(str(file_path))
+        # -----------------------------
+        # Load document
+        # -----------------------------
+
+        documents = load_document(
+            str(temporary_file_path)
+        )
 
         if not documents:
             raise HTTPException(
@@ -118,10 +176,27 @@ async def upload_document(
                 detail="Could not extract content from the document.",
             )
 
-        for document in documents:
-            document.metadata["filename"] = filename
+        # -----------------------------
+        # Add metadata
+        # -----------------------------
 
-        chunks = split_documents(documents)
+        for document in documents:
+
+            document.metadata["filename"] = (
+                original_filename
+            )
+
+            document.metadata["document_uuid"] = (
+                document_uuid
+            )
+
+        # -----------------------------
+        # Split document
+        # -----------------------------
+
+        chunks = split_documents(
+            documents
+        )
 
         if not chunks:
             raise HTTPException(
@@ -129,14 +204,58 @@ async def upload_document(
                 detail="Could not create document chunks.",
             )
 
+        # -----------------------------
+        # Store vectors in Qdrant
+        # -----------------------------
+
         create_vector_store(
             chunks=chunks,
             user_id=user_id,
         )
 
+        # -----------------------------
+        # Upload original file
+        # to Supabase Storage
+        # -----------------------------
+
+        storage_path = (
+            f"{user_id}/{safe_filename}"
+        )
+
+        upload_file(
+            file_path=str(
+                temporary_file_path
+            ),
+            storage_path=storage_path,
+        )
+
+        # -----------------------------
+        # Save document mapping
+        # -----------------------------
+
+        document_id = save_document(
+            user_id=user_id,
+            document_uuid=document_uuid,
+            original_filename=original_filename,
+            storage_path=storage_path,
+        )
+
+        # -----------------------------
+        # Delete temporary file
+        # -----------------------------
+
+        temporary_file_path.unlink(
+            missing_ok=True
+        )
+
         return {
-            "message": "Document uploaded and processed successfully.",
-            "filename": filename,
+            "message": (
+                "Document uploaded and "
+                "processed successfully."
+            ),
+            "document_id": document_id,
+            "document_uuid": document_uuid,
+            "filename": original_filename,
             "user_id": user_id,
             "chunks_created": len(chunks),
         }
@@ -145,9 +264,16 @@ async def upload_document(
         raise
 
     except Exception as e:
+        import traceback
+
+        traceback.print_exc()
+
+        if temporary_file_path:
+            temporary_file_path.unlink(missing_ok=True)
+
         raise HTTPException(
             status_code=500,
-            detail=f"Document processing failed: {str(e)}",
+            detail=f"Document processing failed: {type(e).__name__}: {str(e)}"
         )
 
 
@@ -156,75 +282,108 @@ def list_documents(
     user_id: int = Depends(get_current_user),
 ):
     try:
-        user_upload_dir = UPLOAD_DIR / str(user_id)
 
-        if not user_upload_dir.exists():
-            return {
-                "user_id": user_id,
-                "documents": [],
-            }
+        records = get_user_documents(
+            user_id
+        )
 
         documents = []
 
-        for file_path in user_upload_dir.iterdir():
-            if file_path.is_file():
-                documents.append(
-                    {
-                        "filename": file_path.name,
-                        "size": file_path.stat().st_size,
-                    }
-                )
+        for record in records:
+
+            document_id = record[0]
+            document_uuid = record[1]
+            filename = record[2]
+            storage_path = record[3]
+            created_at = record[4]
+
+            documents.append(
+                {
+                    "id": document_id,
+                    "document_uuid": document_uuid,
+                    "filename": filename,
+                    "storage_path": storage_path,
+                    "created_at": created_at,
+                }
+            )
 
         return {
             "user_id": user_id,
             "documents": documents,
         }
 
-    except Exception:
+    except Exception as e:
+
         raise HTTPException(
             status_code=500,
-            detail="Failed to retrieve documents.",
+            detail=(
+                f"Failed to retrieve documents: {str(e)}"
+            ),
         )
 
 
-@router.delete("/{filename}")
+@router.delete("/{document_id}")
 def delete_document(
-    filename: str,
+    document_id: int,
     user_id: int = Depends(get_current_user),
 ):
     try:
-        filename = Path(filename).name
-        file_path = UPLOAD_DIR / str(user_id) / filename
 
-        if not file_path.exists():
+        # -----------------------------
+        # Get document
+        # -----------------------------
+
+        document = get_document(
+            user_id=user_id,
+            document_id=document_id,
+        )
+
+        if document is None:
             raise HTTPException(
                 status_code=404,
                 detail="Document not found.",
             )
 
-        vector_store = get_vector_store()
+        (
+            db_document_id,
+            document_uuid,
+            original_filename,
+            storage_path,
+            created_at,
+        ) = document
 
-        vector_store._collection.delete(
-            where={
-                "$and": [
-                    {"user_id": str(user_id)},
-                    {"filename": filename},
-                ]
-            }
+        # -----------------------------
+        # Delete from Supabase Storage
+        # -----------------------------
+
+        delete_file(
+            storage_path
         )
 
-        file_path.unlink()
+        # -----------------------------
+        # Delete database record
+        # -----------------------------
+
+        delete_document_record(
+            user_id=user_id,
+            document_id=document_id,
+        )
 
         return {
             "message": "Document deleted successfully.",
-            "filename": filename,
+            "document_id": db_document_id,
+            "document_uuid": document_uuid,
+            "filename": original_filename,
         }
 
     except HTTPException:
         raise
 
     except Exception as e:
+
         raise HTTPException(
             status_code=500,
-            detail=f"Failed to delete document: {str(e)}",
+            detail=(
+                f"Failed to delete document: {str(e)}"
+            ),
         )

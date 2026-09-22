@@ -3,7 +3,6 @@ langchain-community
 pypdf
 python-docx
 langchain-huggingface
-langchain-chroma
 langchain-groq
 fastapi
 uvicorn
@@ -11,3 +10,7 @@ python-jose[cryptography]
 pydantic[email]
 slowapi
 python-multipart
+psycopg[binary]
+langchain-qdrant
+qdrant-client
+supabase

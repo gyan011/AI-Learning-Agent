@@ -1,28 +1,22 @@
-
 import hashlib
 import hmac
 import secrets
-import sqlite3
 
-from pathlib import Path
+import psycopg
+from psycopg.errors import UniqueViolation
 
-
-DATABASE_PATH = Path("data/progress.db")
+from config.settings import DATABASE_URL
 
 
 def get_connection():
     """
-    Create and return a database connection.
+    Create and return a PostgreSQL database connection.
     """
 
-    DATABASE_PATH.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
+    if not DATABASE_URL:
+        raise RuntimeError("DATABASE_URL is not configured.")
 
-    return sqlite3.connect(
-        DATABASE_PATH
-    )
+    return psycopg.connect(DATABASE_URL)
 
 
 def initialize_users_table():
@@ -31,23 +25,26 @@ def initialize_users_table():
     """
 
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL UNIQUE,
-            password_hash TEXT NOT NULL,
-            password_salt TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    email TEXT NOT NULL UNIQUE,
+                    password_hash TEXT NOT NULL,
+                    password_salt TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
 
-    connection.commit()
-    connection.close()
+        connection.commit()
+
+    finally:
+        connection.close()
 
 
 def hash_password(password: str, salt: bytes):
@@ -75,14 +72,10 @@ def create_user(
     """
 
     if not name or not name.strip():
-        raise ValueError(
-            "Name cannot be empty."
-        )
+        raise ValueError("Name cannot be empty.")
 
     if not email or not email.strip():
-        raise ValueError(
-            "Email cannot be empty."
-        )
+        raise ValueError("Email cannot be empty.")
 
     if not password or len(password) < 8:
         raise ValueError(
@@ -99,39 +92,44 @@ def create_user(
     )
 
     connection = get_connection()
-    cursor = connection.cursor()
 
     try:
-
-        cursor.execute(
-            """
-            INSERT INTO users (
-                name,
-                email,
-                password_hash,
-                password_salt,
-                created_at
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                INSERT INTO users (
+                    name,
+                    email,
+                    password_hash,
+                    password_salt,
+                    created_at
+                )
+                VALUES (
+                    %s,
+                    %s,
+                    %s,
+                    %s,
+                    CURRENT_TIMESTAMP
+                )
+                """,
+                (
+                    name.strip(),
+                    email,
+                    password_hash,
+                    salt.hex(),
+                ),
             )
-            VALUES (?, ?, ?, ?, datetime('now'))
-            """,
-            (
-                name.strip(),
-                email,
-                password_hash,
-                salt.hex(),
-            ),
-        )
 
         connection.commit()
 
-    except sqlite3.IntegrityError:
+    except UniqueViolation:
+        connection.rollback()
 
         raise ValueError(
             "An account with this email already exists."
         )
 
     finally:
-
         connection.close()
 
 
@@ -156,25 +154,27 @@ def authenticate_user(
     email = email.strip().lower()
 
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT
-            id,
-            name,
-            email,
-            password_hash,
-            password_salt
-        FROM users
-        WHERE email = ?
-        """,
-        (email,),
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    email,
+                    password_hash,
+                    password_salt
+                FROM users
+                WHERE email = %s
+                """,
+                (email,),
+            )
 
-    user = cursor.fetchone()
+            user = cursor.fetchone()
 
-    connection.close()
+    finally:
+        connection.close()
 
     if user is None:
         return None
@@ -185,9 +185,7 @@ def authenticate_user(
     stored_hash = user[3]
     stored_salt = user[4]
 
-    salt = bytes.fromhex(
-        stored_salt
-    )
+    salt = bytes.fromhex(stored_salt)
 
     password_hash = hash_password(
         password,
@@ -213,20 +211,25 @@ def get_user_by_id(user_id: int):
     """
 
     connection = get_connection()
-    cursor = connection.cursor()
 
-    cursor.execute(
-        """
-        SELECT id, name, email
-        FROM users
-        WHERE id = ?
-        """,
-        (user_id,),
-    )
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT
+                    id,
+                    name,
+                    email
+                FROM users
+                WHERE id = %s
+                """,
+                (user_id,),
+            )
 
-    user = cursor.fetchone()
+            user = cursor.fetchone()
 
-    connection.close()
+    finally:
+        connection.close()
 
     if user is None:
         return None
@@ -236,4 +239,3 @@ def get_user_by_id(user_id: int):
         "name": user[1],
         "email": user[2],
     }
-

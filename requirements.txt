@@ -13,3 +13,7 @@ python-jose[cryptography]
 pydantic[email]
 slowapi
 locust
+psycopg[binary]
+langchain-qdrant
+qdrant-client
+supabase

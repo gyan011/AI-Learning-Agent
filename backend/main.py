@@ -20,6 +20,7 @@ from slowapi.errors import RateLimitExceeded
 from slowapi import _rate_limit_exceeded_handler
 
 from database.usage import initialize_usage_table
+from database.documents import initialize_documents_table
 
 import logging
 import time
@@ -34,6 +35,7 @@ setup_logging()
 logger = logging.getLogger("ai_learning_agent")
 
 initialize_usage_table()
+initialize_documents_table()
 
 
 app = FastAPI(
